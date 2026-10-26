@@ -2,6 +2,7 @@
 #include "config.h"
 #include "storage.h"
 #include "network.h"
+#include "epd_driver.h"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -257,6 +258,10 @@ void startCaptivePortal() {
         float v = readBatteryVoltage();
         String json = "{\"mac\":\"" + WiFi.macAddress() + "\",";
         json += "\"battery\":\"" + String(v, 2) + "V\",";
+#if defined(EPD_PANEL_398_HUAWEI)
+        json += "\"panel\":\"huawei-398\",";
+        json += "\"panel_rev\":\"" + String(epdHuaweiRevName()) + "\",";
+#endif
         json += "\"server_url\":\"" + cfgServer + "\"}";
         webServer.send(200, "application/json", json);
     });
@@ -434,7 +439,34 @@ void startCaptivePortal() {
                        ",\"list\":" + buildWiFiListJson() + "}");
     });
 
-    // ── Route: Manual restart ───────────────────────────────
+#if defined(EPD_PANEL_398_HUAWEI)
+    webServer.on("/panel", HTTP_GET, []() {
+        String rev = epdHuaweiRevName();
+        String html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\">";
+        html += "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
+        html += "<title>Huawei panel</title></head><body>";
+        html += "<h2>华为 3.98 寸屏</h2>";
+        html += "<p>当前版本：<b>" + rev + "</b></p>";
+        html += "<p>分辨率 768×552。A0 和 A1 的初始化不同。</p>";
+        html += "<form method=\"POST\" action=\"/panel\">";
+        html += "<button name=\"rev\" value=\"A1\" type=\"submit\">使用 A1</button> ";
+        html += "<button name=\"rev\" value=\"A0\" type=\"submit\">使用 A0</button>";
+        html += "</form><p>切换后，下一次刷新生效。</p></body></html>";
+        webServer.send(200, "text/html", html);
+    });
+    webServer.on("/panel", HTTP_POST, []() {
+        String rev = webServer.arg("rev");
+        rev.toUpperCase();
+        if (rev != "A0" && rev != "A1") {
+            webServer.send(400, "text/plain", "rev must be A0 or A1");
+            return;
+        }
+        saveHuaweiPanelRev(rev == "A0" ? 0 : 1);
+        webServer.sendHeader("Location", "/panel");
+        webServer.send(303, "text/plain", "ok");
+    });
+#endif
+
     webServer.on("/restart", HTTP_POST, []() {
         Serial.println("\n--- /restart Request Received ---");
         webServer.send(200, "application/json", "{\"ok\":true}");

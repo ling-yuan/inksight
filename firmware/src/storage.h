@@ -63,4 +63,9 @@ void clearDeviceToken();
 void savePendingPairCode(const String &code);
 void clearPendingPairCode();
 
+#if defined(EPD_PANEL_398_HUAWEI)
+// 0 = A0, 1 = A1. Saved across reboot.
+void saveHuaweiPanelRev(uint8_t rev);
+#endif
+
 #endif // INKSIGHT_STORAGE_H

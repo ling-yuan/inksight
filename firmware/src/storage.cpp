@@ -1,5 +1,6 @@
 #include "storage.h"
 #include "config.h"
+#include "epd_driver.h"
 #include <Preferences.h>
 
 static Preferences prefs;
@@ -53,6 +54,16 @@ static void persistWiFiList(Preferences &p) {
     }
 }
 
+#if defined(EPD_PANEL_398_HUAWEI)
+static void loadHuaweiRevFromNvs() {
+    Preferences p;
+    p.begin("inksight", true);
+    uint8_t rev = p.getUChar("epd_rev", 1);
+    p.end();
+    epdSetHuaweiRev(rev ? 1 : 0);
+}
+#endif
+
 // Mirror slot 0 into the legacy cfgSSID/cfgPass runtime vars used downstream.
 static void syncPrimaryRuntime() {
     if (g_wifiCount > 0) {
@@ -83,6 +94,9 @@ void loadConfig() {
         cfgDeviceToken = "";
         cfgPendingPairCode = "";
         g_wifiCount = 0;
+#if defined(EPD_PANEL_398_HUAWEI)
+        loadHuaweiRevFromNvs();
+#endif
         return;
     }
 
@@ -133,7 +147,19 @@ void loadConfig() {
     if (cfgServer.length() > 200) {
         cfgServer = DEFAULT_SERVER;
     }
+#if defined(EPD_PANEL_398_HUAWEI)
+    loadHuaweiRevFromNvs();
+#endif
 }
+
+#if defined(EPD_PANEL_398_HUAWEI)
+void saveHuaweiPanelRev(uint8_t rev) {
+    prefs.begin("inksight", false);
+    prefs.putUChar("epd_rev", rev ? 1 : 0);
+    prefs.end();
+    epdSetHuaweiRev(rev ? 1 : 0);
+}
+#endif
 
 // ── Retry counter ───────────────────────────────────────────
 

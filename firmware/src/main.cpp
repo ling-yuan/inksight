@@ -36,6 +36,16 @@
 // ── Shared framebuffers (referenced by other modules via extern) ──
 uint8_t imgBuf[IMG_BUF_LEN];
 #if EPD_BPP >= 2
+#if defined(EPD_PANEL_398_HUAWEI)
+// 768x552 2bpp is 103.5 KB. Keep it in BSS so Wi-Fi can still use the heap.
+static uint8_t colorBufStorage[COLOR_BUF_LEN];
+uint8_t *colorBuf = colorBufStorage;
+bool useColorBuf = false;
+
+bool ensureColorBuf() {
+    return true;
+}
+#else
 uint8_t *colorBuf = nullptr;
 bool useColorBuf = false;
 
@@ -49,6 +59,7 @@ bool ensureColorBuf() {
     Serial.printf("[MEM] colorBuf allocated %d bytes on heap\n", COLOR_BUF_LEN);
     return true;
 }
+#endif
 #endif
 
 // ── Voice constants ─────────────────────────────────────────

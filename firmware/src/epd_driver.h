@@ -32,4 +32,11 @@ void epdPartialDisplayWithOld(uint8_t *data, const uint8_t *oldData, int xStart,
 // Put EPD into deep sleep mode
 void epdSleep();
 
+#if defined(EPD_PANEL_398_HUAWEI)
+// 0 = A0, 1 = A1. Takes effect on the next refresh.
+void epdSetHuaweiRev(uint8_t rev);
+uint8_t epdGetHuaweiRev();
+const char *epdHuaweiRevName();
+#endif
+
 #endif // INKSIGHT_EPD_DRIVER_H

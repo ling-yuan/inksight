@@ -1,7 +1,9 @@
 #include "epd_driver.h"
 #include "config.h"
 
-#if defined(EPD_PANEL_42_SSD1683_BW) || defined(EPD_PANEL_42_DKE_RY683) || defined(EPD_PANEL_42_GDEM042F52)
+#if defined(EPD_PANEL_398_HUAWEI)
+// Huawei 3.98" driver lives in epd_huawei398.cpp.
+#elif defined(EPD_PANEL_42_SSD1683_BW) || defined(EPD_PANEL_42_DKE_RY683) || defined(EPD_PANEL_42_GDEM042F52)
 
 // ── Software SPI (bit-bang) for 4.2" panels ──
 // Avoids Busy Timeout on ESP32-C3 with non-default pins; no GxEPD2 dependency.
@@ -1008,4 +1010,4 @@ void epdSleep() {
     _needs_full_refresh_write = true;
 #endif
 }
-#endif // EPD_PANEL_42_SSD1683_BW
+#endif // panel dispatch
