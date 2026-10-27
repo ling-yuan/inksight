@@ -227,7 +227,9 @@ void bleStart() {
     BLESecurity::setCapability(ESP_IO_CAP_NONE);
     BLESecurity::setInitEncryptionKey();
     BLESecurity::setRespEncryptionKey();
-    BLESecurity::setForceAuthentication(true);
+    // 不在连接瞬间强制配对。系统设置没有本服务，配完就会断开。
+    // 手机应用写入加密特征时再配对。
+    BLESecurity::setForceAuthentication(false);
     BLEDevice::setSecurityCallbacks(&s_securityCb);
 
     s_server = BLEDevice::createServer();
@@ -251,8 +253,16 @@ void bleStart() {
 
     service->start();
 
+    // 广播包只有 31 字节。名称和 128 位 UUID 不能同时放入。
+    // 名称放在广播包里，系统和应用才能在不读扫描响应时看到 InkSight398。
     BLEAdvertising *adv = BLEDevice::getAdvertising();
-    adv->addServiceUUID(SVC_UUID);
+    BLEAdvertisementData advData;
+    advData.setFlags(ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
+    advData.setName("InkSight398");
+    BLEAdvertisementData scanData;
+    scanData.setCompleteServices(BLEUUID(SVC_UUID));
+    adv->setAdvertisementData(advData);
+    adv->setScanResponseData(scanData);
     adv->setScanResponse(true);
     BLEDevice::startAdvertising();
     Serial.println("[BLE] advertising InkSight398");
