@@ -8,7 +8,7 @@ static_assert(EPD_WIDTH == 768 && EPD_HEIGHT == 552,
 // A0 and A1 share the glass size. Their controller handshake differs.
 // Pixel buffer is InkSight raw 2bpp: row 0 is the top, 4 pixels per byte,
 // MSB first, 0=black 1=white 2=yellow 3=red.
-// Each row is mirrored horizontally before it is sent. BUSY is active-low.
+// Columns stay left to right. BUSY is active-low.
 
 static const int HW_W = 768;
 static const int HW_H = 552;
@@ -20,9 +20,16 @@ static const unsigned long HW_BUSY_REFRESH_MS = 45000;
 static const unsigned long HW_BUSY_LONG_MS = 180000;
 
 static uint8_t s_rev = 1;  // 0=A0, 1=A1
+static bool s_ready = false;
+static bool s_powered = false;
 
 void epdSetHuaweiRev(uint8_t rev) {
-    s_rev = rev ? 1 : 0;
+    uint8_t next = rev ? 1 : 0;
+    if (next != s_rev) {
+        s_ready = false;
+        s_powered = false;
+    }
+    s_rev = next;
     Serial.printf("[EPD] Huawei panel %s\n", s_rev ? "A1" : "A0");
 }
 
@@ -76,18 +83,12 @@ static void hwReset() {
     delay(50);
 }
 
-// Returns elapsed milliseconds, or -1 on timeout. BUSY low means busy.
+// BUSY is not allowed to delay a new frame. A low pin used to block for up to
+// 180s before the refresh command. The reset pulse below aborts that state.
 static int hwWaitBusy(unsigned long timeoutMs) {
-    unsigned long t0 = millis();
-    while (digitalRead(PIN_EPD_BUSY) == LOW) {
-        delay(10);
-        if (millis() - t0 > timeoutMs) {
-            Serial.printf("[EPD] BUSY timeout %lu ms, level=%d\n",
-                          timeoutMs, digitalRead(PIN_EPD_BUSY));
-            return -1;
-        }
-    }
-    return (int)(millis() - t0);
+    (void)timeoutMs;
+    Serial.printf("[EPD] skip BUSY wait, level=%d\n", digitalRead(PIN_EPD_BUSY));
+    return 0;
 }
 
 static void hwSetWindow(int width, int ys, int ye) {
@@ -101,16 +102,7 @@ static void hwSetWindow(int width, int ys, int ye) {
     hwCmd(0x83, d, sizeof(d));
 }
 
-static void hwMirror2bpp(uint8_t *dst, const uint8_t *src) {
-    for (int i = 0; i < HW_ROW; i++) {
-        uint8_t s = src[HW_ROW - 1 - i];
-        dst[i] = (uint8_t)(((s & 0x03) << 6) | ((s & 0x0C) << 2) |
-                           ((s & 0x30) >> 2) | ((s & 0xC0) >> 6));
-    }
-}
-
 static void hwRowFromMono(uint8_t *dst, const uint8_t *image, int y) {
-    uint8_t packed[HW_ROW];
     const int rowBytes = HW_W / 8;
     for (int x = 0; x < HW_W; x += 4) {
         uint8_t b = 0;
@@ -119,14 +111,13 @@ static void hwRowFromMono(uint8_t *dst, const uint8_t *image, int y) {
             bool isBlack = (image[y * rowBytes + px / 8] & (0x80 >> (px % 8))) == 0;
             b |= (uint8_t)((isBlack ? 0x00 : 0x01) << (6 - bit * 2));
         }
-        packed[x / 4] = b;
+        dst[x / 4] = b;
     }
-    hwMirror2bpp(dst, packed);
 }
 
 static void hwLoadRow(uint8_t *dst, const uint8_t *image, bool is2bpp, int y) {
     if (is2bpp) {
-        hwMirror2bpp(dst, image + (size_t)y * HW_ROW);
+        memcpy(dst, image + (size_t)y * HW_ROW, HW_ROW);
     } else {
         hwRowFromMono(dst, image, y);
     }
@@ -185,10 +176,14 @@ static int hwInitA1() {
     return 0;
 }
 
+static int hwPowerOn() {
+    hwCmd(0x04, nullptr, 0);
+    unsigned long timeout = s_rev ? HW_BUSY_LONG_MS : HW_BUSY_REFRESH_MS;
+    return hwWaitBusy(timeout) < 0 ? -1 : 0;
+}
+
 static int hwWriteA0(const uint8_t *image, bool is2bpp) {
     uint8_t row[HW_ROW];
-    hwCmd(0x04, nullptr, 0);
-    if (hwWaitBusy(HW_BUSY_REFRESH_MS) < 0) return -1;
 
     for (int j = 0; j < HW_H; j++) {
         int ys = (j < HW_H / 2) ? (j * 2) : (2 * (HW_H - j) + HW_A0_Y_BASE);
@@ -204,8 +199,6 @@ static int hwWriteA0(const uint8_t *image, bool is2bpp) {
 
 static int hwWriteA1(const uint8_t *image, bool is2bpp) {
     uint8_t row[HW_ROW];
-    hwCmd(0x04, nullptr, 0);
-    if (hwWaitBusy(HW_BUSY_REFRESH_MS) < 0) return -1;
 
     hwSetWindow(HW_W, 0, HW_H - 1);
     hwCmd(0x10, nullptr, 0);
@@ -222,24 +215,22 @@ static int hwWriteA1(const uint8_t *image, bool is2bpp) {
 static int hwRefresh() {
     uint8_t z = 0x00;
     hwCmd(0x12, &z, 1);
-    if (s_rev) {
-        int elapsed = hwWaitBusy(HW_BUSY_LONG_MS);
-        if (elapsed < 0) return -1;
-        if (elapsed < 250) {
-            Serial.printf("[EPD] A1 BUSY released after %d ms, wait 14s\n", elapsed);
-            delay(14000);
-        } else {
-            delay(500);
-        }
-        return 0;
-    }
-    return hwWaitBusy(HW_BUSY_REFRESH_MS) < 0 ? -1 : 0;
+    Serial.printf("[EPD] refresh command sent, BUSY=%d\n", digitalRead(PIN_EPD_BUSY));
+    return 0;
 }
 
-static int hwPowerOff() {
-    uint8_t z = 0x00;
-    hwCmd(0x02, &z, 1);
-    return hwWaitBusy(HW_BUSY_REFRESH_MS) < 0 ? -1 : 0;
+static int hwEnsurePowered() {
+    int ok = 0;
+    if (!s_ready) {
+        ok = s_rev ? hwInitA1() : hwInitA0();
+        s_ready = ok == 0;
+        s_powered = s_ready;
+    } else if (!s_powered) {
+        ok = hwPowerOn();
+        s_powered = ok == 0;
+        if (ok != 0) s_ready = false;
+    }
+    return ok;
 }
 
 static void hwShow(const uint8_t *image, bool is2bpp) {
@@ -247,17 +238,27 @@ static void hwShow(const uint8_t *image, bool is2bpp) {
     int outH = s_rev ? HW_A1_GATES : HW_H;
     for (int attempt = 0; attempt < 3; attempt++) {
         unsigned long t0 = millis();
-        Serial.printf("[EPD] %s attempt %d BUSY=%d\n",
+        Serial.printf("[EPD] %s attempt %d BUSY=%d, reset and refresh\n",
                       epdHuaweiRevName(), attempt + 1, digitalRead(PIN_EPD_BUSY));
         int ok = s_rev ? hwInitA1() : hwInitA0();
+        s_ready = ok == 0;
+        s_powered = s_ready;
         if (ok != 0) continue;
         ok = s_rev ? hwWriteA1(image, is2bpp) : hwWriteA0(image, is2bpp);
-        if (ok != 0) continue;
+        if (ok != 0) {
+            s_ready = false;
+            s_powered = false;
+            continue;
+        }
         Serial.printf("[EPD] frame written %lu ms\n", millis() - t0);
         hwSetWindow(HW_W, 0, outH - 1);
-        if (hwRefresh() != 0) continue;
-        Serial.printf("[EPD] refresh done %lu ms\n", millis() - t0);
-        hwPowerOff();
+        if (hwRefresh() != 0) {
+            s_ready = false;
+            s_powered = false;
+            continue;
+        }
+        Serial.printf("[EPD] refresh started %lu ms\n", millis() - t0);
+        s_powered = true;
         return;
     }
     Serial.println("[EPD] display failed after 3 attempts");
@@ -282,6 +283,15 @@ void gpioInit() {
 
 void epdInit() {
     Serial.println("[EPD] Huawei 3.98 ready");
+}
+
+void epdPrepare() {
+    Serial.println("[EPD] prepare while receiving");
+    if (hwEnsurePowered() != 0) {
+        s_ready = false;
+        s_powered = false;
+        Serial.println("[EPD] prepare failed");
+    }
 }
 
 void epdInitFast() { epdInit(); }
@@ -310,6 +320,8 @@ void epdPartialDisplayWithOld(uint8_t *data, const uint8_t *oldData,
 void epdSleep() {
     uint8_t z = 0xA5;
     hwCmd(0x07, &z, 1);
+    s_ready = false;
+    s_powered = false;
     delay(200);
 }
 

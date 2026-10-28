@@ -13,7 +13,9 @@
  *   0x02 开始收图：后跟 uint32 长度、uint16 宽、uint16 高
  *        只接受 768x552 且长度等于宽*高/4
  *   0x03 显示图片：图像字节必须已经收齐。
+ *        收齐后设备立即开始刷新，不必等这条命令。
  *        设备先回复一次，表示开始刷新。刷新结束后再回复一次。
+ *        若刷新已经开始，这条命令直接回复成功。
  *   0x04 读取设置
  *   0x05 设置屏幕版本：后跟 uint8，0=A0，1=A1
  *
@@ -34,7 +36,9 @@ void bleStart();
 void bleStop();
 bool bleConnected();
 
-// 主循环调用。返回 true 时 colorBuf 已收齐，可以刷屏。
+// 主循环在收图期间调用，提前给墨水屏上电。
+bool bleTakePrepareRequest();
+// 主循环调用。返回 true 时 colorBuf 已收齐，立刻刷屏。
 bool bleTakeShowRequest();
 void bleNotifyShowDone(bool ok);
 

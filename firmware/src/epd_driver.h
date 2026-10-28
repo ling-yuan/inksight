@@ -18,6 +18,9 @@ void epdDisplay(const uint8_t *image);
 // Deep clear: multi-cycle black/white flush then display image (eliminates stubborn ghosting)
 void epdDisplayDeepClear(const uint8_t *image);
 
+// Power on the panel while an image is still arriving.
+void epdPrepare();
+
 // Full-screen display with pre-packed 2bpp data (4-color panels)
 void epdDisplay2bpp(const uint8_t *image2bpp);
 

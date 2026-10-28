@@ -39,6 +39,7 @@ static bool s_stopping = false;
 static uint16_t s_connId = 0;
 static bool s_imgOpen = false;
 static uint32_t s_imgGot = 0;
+static volatile bool s_prepare = false;
 static volatile bool s_show = false;
 static volatile bool s_busy = false;
 
@@ -81,7 +82,7 @@ static void onControl(const uint8_t *data, size_t len) {
     bleNoteActivity();
     if (len < 1) return;
     uint8_t op = data[0];
-    if (s_busy && op != OP_GET) {
+    if (s_busy && op != OP_GET && op != OP_SHOW) {
         notifyResult(op, ST_BUSY);
         return;
     }
@@ -115,11 +116,16 @@ static void onControl(const uint8_t *data, size_t len) {
         }
         s_imgOpen = true;
         s_imgGot = 0;
+        s_prepare = true;
         notifyResult(op, ST_OK);
         break;
     }
     case OP_SHOW:
-        if (!s_imgOpen || s_imgGot != (uint32_t)COLOR_BUF_LEN) {
+        if (s_busy || s_show) {
+            notifyResult(op, ST_OK);
+            return;
+        }
+        if (s_imgGot != (uint32_t)COLOR_BUF_LEN) {
             notifyResult(op, ST_SHORT);
             return;
         }
@@ -156,6 +162,12 @@ static void onImage(const uint8_t *data, size_t len) {
     }
     memcpy(colorBuf + s_imgGot, data, len);
     s_imgGot += len;
+    if (s_imgGot == (uint32_t)COLOR_BUF_LEN) {
+        s_imgOpen = false;
+        __sync_synchronize();
+        s_show = true;
+        Serial.println("[BLE] image in, refresh");
+    }
 }
 
 class ControlCallbacks : public BLECharacteristicCallbacks {
@@ -271,6 +283,8 @@ void bleStart() {
 void bleStop() {
     s_stopping = true;
     s_imgOpen = false;
+    s_prepare = false;
+    s_show = false;
     if (s_connected && s_server) {
         s_server->disconnect(s_connId);
         delay(200);
@@ -285,6 +299,12 @@ void bleStop() {
 }
 
 bool bleConnected() { return s_connected; }
+
+bool bleTakePrepareRequest() {
+    if (!s_prepare) return false;
+    s_prepare = false;
+    return true;
+}
 
 bool bleTakeShowRequest() {
     if (!s_show) return false;
